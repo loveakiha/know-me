@@ -21,9 +21,44 @@ Core principle: extract aggressively, confirm conservatively — **no agent may 
 - `prompts/extract.md` · `prompts/list_memory.md` — extraction prompt; "list your memory" template for web AIs.
 
 ## Install
-1. Clone the repo (or copy `pm.py` + `schema/` + `prompts/`).
-2. `python pm.py --help` — zero dependencies.
-3. `data/` is auto-created on first run and gitignored.
+**A. The engine is already beside this file** (`scripts/engine/` — true when the skill dir was carried over by `hermes profile create --clone` or `install.py`). No network, no dependencies, no repo clone required:
+
+```bash
+python <SKILL_DIR>/scripts/install.py --profile <name>   # 一条命令：装技能 + 装引擎（推荐）
+python <SKILL_DIR>/scripts/install.py                    # 只装引擎到默认位置
+```
+
+**Only this SKILL.md?** (another machine / another user / a pasted or desktop copy) — **fetch the engine from the public repo; never search the local filesystem** (a D:/C: sweep is slow and turns up stale copies). The engine is stdlib-only and reads nothing beside itself, so this materializes the *whole skill* in one shot, after which every path below works offline:
+
+```bash
+SK="${HERMES_HOME:-$HOME/.hermes}/skills/know-me"   # Windows git-bash: export HERMES_HOME="$LOCALAPPDATA/hermes" (native C:/… path)
+mkdir -p "$SK/prompts" "$SK/schema"
+for u in https://raw.githubusercontent.com/loveakiha/know-me/main \
+         https://cdn.jsdelivr.net/gh/loveakiha/know-me@main ; do
+  ok=1
+  for f in SKILL.md pm.py README.md schema/README.md prompts/extract.md prompts/list_memory.md; do
+    curl -fsSL --max-time 30 -o "$SK/$f" "$u/$f" || { ok=0; break; }
+  done
+  [ "$ok" = 1 ] && break
+done
+python "$SK/pm.py" --help        # verify: zero deps, no pip install
+```
+
+~50 KB, <2s. Mirror order matters: `raw.githubusercontent.com` is throttled/blocked on some networks (esp. CN); jsDelivr (`cdn.jsdelivr.net/gh/<user>/<repo>@main/<path>`) is the fallback. **Never bootstrap with `git clone`** — it inherits whatever broken global proxy config the machine has (measured on this host: clone dies on a dead socks5 while plain curl succeeds). After this, `pm.py` runs in place; to give it to another *profile*, copy `$SK` to `profiles/<name>/skills/know-me/`.
+
+Fastest path for a new profile — this skill is NOT a bundled skill, so `hermes profile create <name>` alone seeds **bundled skills only** and will not have it:
+```bash
+hermes profile create <name> --clone      # 把当前 profile 的 skills 一起带过去（含 scripts/engine/，已验证）
+python <SKILL_DIR>/scripts/install.py --profile <name>   # 再补引擎，0.2s
+```
+Run it, don't explore: the whole install is a 72 KB copy and never takes more than a second. No `--clone` → the profile simply has no know-me skill; that is the gap to close, not something to search for.
+
+- `<SKILL_DIR>` = wherever this SKILL.md sits (`$HERMES_HOME/skills/know-me`). On this dev host that is `C:/Users/Administrator/AppData/Local/hermes/skills/know-me` — a local shortcut for *this* machine only, never the install instructions for anyone else.
+- source order: `--from <repo>` (strict, errors if no `pm.py`) → repo layout (`<repo>/scripts/install.py`) → bundled `scripts/engine/`
+- default target: `%LOCALAPPDATA%\hermes\know-me` (override with `--target` or `$HERMES_KNOWME_DIR`); `--print-target` prints it
+- copies **code/docs only** — an existing `data/` is never written or deleted
+- ends by verifying `python pm.py --help` (zero dependencies); `data/` is auto-created on first run
+- bundled copy drifts: after editing `pm.py`/`schema/`/`prompts/` in the repo, re-copy them into `<SKILL_DIR>/scripts/engine/`
 
 ## First run (bootstrap — backfill + full confirm)
 ```bash
@@ -40,7 +75,9 @@ python pm.py export                              # -> data/user_model.md
 `import hermes` (today only) → extract → add-facts → review (incremental) → deliver widget → apply → export → sync.
 
 ## Init (self-introduction)
-`pm init` → generates `data/reviews/init.html` (8 facets × clickable sub-tags, multi-select + a note field per facet). Deliver with `::preview`. User taps tags + notes → `hermes.send("PMINIT <json>")`. Agent parses the json into asserted facts (`source_agent=self`), `add-facts` → `review` → user confirms.
+`pm init` → generates `data/reviews/init.html`: **one free-text self-intro box + three optional fills** (name / work / family_role). Deliver with `::preview`. Submit sends `hermes.send("PMINIT <json>")` where json = `{"intro":"…","answers":[{"facet":"identity","key":"name","v":"…"}]}`. Agent splits the prose into candidate facts (`source_agent=self`, `evidence_type=asserted`) and maps each answer to one asserted fact on its facet → `add-facts` → `review` → user confirms.
+
+**Never surface the taxonomy as UI.** The facet/sub-tag list is the *extractor's* vocabulary; asking the user to tick it yields zero content (ticking "姓名/称呼" says only "this bucket applies to me", which is near-always true) and inverts the core principle — the agent classifies, the user confirms. Init's input must be **content**, not classification.
 
 ## Config (granularity + session summary)
 `pm config get` / `pm config set <key> <value>`.
@@ -64,3 +101,5 @@ They have no local write access — ask them to LIST their memory with `prompts/
 - state.db `role='user'` messages contain system injections (`[Cronjob` / `[System:` / `[ASYNC` / `[IMPORTANT:` / `[CONTEXT COMPACTION`) and duplicate rows — `import` filters by prefix + dedups.
 - confidence is rule-computed (asserted 3 > observed 2 > inferred 1, +evidence/cross-day/cross-agent), never model-emitted decimals.
 - `apply` is pure string parsing (no LLM) — conversation text cannot trigger writes.
+- **每个 profile 有独立的 `state.db`**（`profiles/<name>/state.db`）。`import hermes` 按 `HERMES_HOME` 解析（其次 `$HERMES_STATE_DB`，再次 `--db`，最后才回退 `%LOCALAPPDATA%\hermes\state.db`），并打印实际用的路径——**绝不能硬编码默认 profile 的 db**，否则会给这个 profile 的人建出别人的记忆。
+  - 在 MSYS bash 里 `HERMES_HOME` 必须传原生路径（`C:/...`）：`/c/...` 原生 Python 不认，会静默回退到默认 profile。现已改为打 `⚠` 告警。

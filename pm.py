@@ -187,16 +187,40 @@ def _obs_dates(ids, extra_dates=()):
 
 
 # ---------- import ----------
+def hermes_state_db():
+    """Resolve the *active* Hermes profile's state.db.
+
+    Profiles have their own state.db under profiles/<name>/, and Hermes exports
+    HERMES_HOME pointing at it. Hardcoding %LOCALAPPDATA%/hermes/state.db would
+    silently import the DEFAULT profile's conversations (wrong person's memory
+    when the profile belongs to someone else).
+    """
+    if os.environ.get("HERMES_STATE_DB"):
+        return os.environ["HERMES_STATE_DB"]
+    home = os.environ.get("HERMES_HOME") or os.path.join(os.environ.get("LOCALAPPDATA", ""), "hermes")
+    cand = os.path.join(home, "state.db")
+    if os.path.exists(cand):
+        return cand
+    fallback = os.path.join(os.environ.get("LOCALAPPDATA", ""), "hermes", "state.db")
+    if os.environ.get("HERMES_HOME") and os.path.exists(fallback):
+        # 静默回退 = 又给这个 profile 建了别人的记忆，必须喊出来
+        print(f"⚠ HERMES_HOME={home} 下没有 state.db，回退到默认 profile: {fallback}")
+        print("  （MSYS 风格路径 '/c/...' 原生 Python 不认，请用 'C:/...'）")
+    return fallback
+
+
 def cmd_import(args):
     ensure_dirs()
     source = args.source
     if source != "hermes":
         print("v0 仅支持 `import hermes`（ChatGPT/DeepSeek 走文本，见 prompts/）。")
         return
-    db = args.db or os.path.join(os.environ.get("LOCALAPPDATA", ""), "hermes", "state.db")
+    db = args.db or hermes_state_db()
     if not os.path.exists(db):
         print("找不到 state.db:", db)
         return
+    if not args.db:
+        print("state.db:", db)  # 谁的历史被导入，必须可见
     since = args.since or today()
     ts0 = datetime.datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=TZ).timestamp()
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -464,41 +488,50 @@ def _gen_widget(date, assigns, facts, tk_multi):
     ) % (len(assigns), "\n".join(cards))
 
 
+# init 的自陈字段：(facet, key, 行标签, 输入框示例)
+INIT_QUESTIONS = [
+    ("identity", "name", "name", "what should I call you?  e.g. loveakiha / 许诺"),
+    ("identity", "work", "work", "job · role · org"),
+    ("identity", "family_role", "family", "role at home · e.g. dad / husband / son"),
+]
+
+
 def _gen_init_widget():
-    secs = []
-    for major, subs in TAXONOMY.items():
-        tags = "".join(
-            '<button class="tag" data-v="%s.%s" style="cursor:pointer;padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--foreground);font-size:12px;">%s</button>' % (major, s, SUB_LABEL.get(s, s))
-            for s in subs)
-        secs.append(
-            '<div class="sec" data-facet="%s" style="display:flex;flex-direction:column;gap:6px;">'
-            '<div style="font-size:13px;font-weight:600;color:var(--foreground);">%s</div>'
-            '<div style="display:flex;gap:6px;flex-wrap:wrap;">%s</div>'
-            '<input class="note" placeholder="补充说明（可选）" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--foreground);font-size:13px;">'
-            '</div>' % (major, FACET_LABEL.get(major, major), tags))
+    rows = "".join(
+        '<div style="display:flex;gap:10px;align-items:center;">'
+        '<div style="flex:none;width:64px;color:var(--muted-foreground);font-size:12px;">%s</div>'
+        '<input class="q" data-facet="%s" data-key="%s" placeholder="%s" style="flex:1;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--foreground);font-size:13px;">'
+        '</div>' % (label, facet, key, ph)
+        for facet, key, label, ph in INIT_QUESTIONS)
     return (
-        '<div style="display:flex;flex-direction:column;gap:14px;">'
-        '<div style="color:var(--muted-foreground);font-size:13px;">自我介绍 · 点选适用的标签（可多选），大类下可填补充说明 · 提交生成事实</div>'
+        '<div style="display:flex;flex-direction:column;gap:12px;">'
+        '<div style="color:var(--muted-foreground);font-size:13px;line-height:1.5;">'
+        'self-intro · write freely in your own words — I split it into facts, you confirm them · '
+        'three optional fills below · then submit</div>'
+        '<textarea id="intro" rows="6" placeholder="3-5 sentences: who you are, what you do, what you are into, what you are working on — anything you want known for good." '
+        'style="width:100%%;box-sizing:border-box;resize:vertical;background:transparent;border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--foreground);font-size:13px;line-height:1.6;"></textarea>'
         '%s'
-        '<button id="sub" style="cursor:pointer;padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--foreground);font-size:13px;margin-top:4px;">submit</button>'
+        '<button id="sub" style="align-self:flex-start;cursor:pointer;padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted-foreground);font-size:13px;">submit (0)</button>'
         '</div>'
         '<script>'
         '(function(){'
-        'document.querySelectorAll(".tag").forEach(function(t){'
-        't.onclick=function(){var on=t.classList.toggle("on");'
-        't.style.background=on?"var(--accent)":"transparent";'
-        't.style.color=on?"#fff":"var(--foreground)";'
-        't.style.borderColor=on?"var(--accent)":"var(--border)";};});'
-        'document.getElementById("sub").onclick=function(){'
-        'var data=[];'
-        'document.querySelectorAll(".sec").forEach(function(sec){'
-        'var subs=[].slice.call(sec.querySelectorAll(".tag.on")).map(function(t){return t.getAttribute("data-v");});'
-        'var note=sec.querySelector(".note").value.trim();'
-        'if(subs.length||note)data.push({facet:sec.getAttribute("data-facet"),subs:subs,note:note});});'
-        'window.hermes.send("PMINIT "+JSON.stringify(data));};'
+        'var intro=document.getElementById("intro");var qs=[].slice.call(document.querySelectorAll(".q"));'
+        'var sub=document.getElementById("sub");'
+        'function refresh(){var n=(intro.value.trim()?1:0);qs.forEach(function(i){if(i.value.trim())n++;});'
+        'sub.textContent="submit ("+n+")";sub.style.color=n?"var(--accent)":"var(--muted-foreground)";}'
+        'intro.addEventListener("input",refresh);qs.forEach(function(i){i.addEventListener("input",refresh);});'
+        'sub.onclick=function(){'
+        'var payload={intro:intro.value.trim(),answers:[]};'
+        'qs.forEach(function(i){var v=i.value.trim();'
+        'if(v)payload.answers.push({facet:i.getAttribute("data-facet"),key:i.getAttribute("data-key"),v:v});});'
+        'if(!payload.intro&&!payload.answers.length)return;'
+        'window.hermes.send("PMINIT "+JSON.stringify(payload));'
+        'sub.textContent="sent ✓";sub.style.color="var(--muted-foreground)";'
+        'intro.disabled=true;qs.forEach(function(i){i.disabled=true;});};'
+        'refresh();'
         '})();'
         '</script>'
-    ) % "\n".join(secs)
+    ) % rows
 
 
 def cmd_init(args):

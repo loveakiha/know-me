@@ -62,6 +62,14 @@ TAXONOMY = {
 }
 FACET_LABEL = {"identity": "身份", "traits": "特质/偏好", "skills": "能力/特长", "interests": "兴趣/爱好",
                "activities": "活动/项目", "environment": "环境/设备", "relationships": "关系", "goals": "目标"}
+SUB_LABEL = {"name": "姓名/称呼", "work": "职业/工作", "family_role": "家庭角色", "demographics": "人口信息",
+             "personality": "人格特质", "communication": "沟通偏好", "decision": "决策方式", "values": "价值观",
+             "technical": "技术能力", "domain": "领域知识", "tools": "工具熟练",
+             "tech": "科技/AI", "gaming": "游戏", "space": "太空", "parenting": "育儿", "other": "其他",
+             "active": "进行中", "closed": "已关停", "planned": "计划中",
+             "hardware": "硬件", "software": "软件", "network": "网络",
+             "family": "家人", "friends": "朋友", "colleagues": "同事",
+             "near_term": "近期目标", "long_term": "长期目标"}
 OLD_TO_FACET = {"current_activity": "activities", "project": "activities", "interest": "interests",
                 "tool_environment": "environment", "preference": "traits", "goal": "goals",
                 "habit": "traits", "constraint": "traits", "context": "traits"}
@@ -114,7 +122,8 @@ def append_jsonl(p, item):
         f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
-DEFAULT_CONFIG = {"granularity": "exhaustive"}  # exhaustive=事无巨细 / concise=关键重要(≤5条/天, 大类合并)
+DEFAULT_CONFIG = {"granularity": "exhaustive",  # exhaustive=事无巨细 / concise=关键重要(≤5条/天, 大类合并)
+                  "session_summary": False}  # True=会话尾声(话题转移/问题解决)自动总结候选给用户判断
 
 
 def load_config():
@@ -455,6 +464,50 @@ def _gen_widget(date, assigns, facts, tk_multi):
     ) % (len(assigns), "\n".join(cards))
 
 
+def _gen_init_widget():
+    secs = []
+    for major, subs in TAXONOMY.items():
+        tags = "".join(
+            '<button class="tag" data-v="%s.%s" style="cursor:pointer;padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--foreground);font-size:12px;">%s</button>' % (major, s, SUB_LABEL.get(s, s))
+            for s in subs)
+        secs.append(
+            '<div class="sec" data-facet="%s" style="display:flex;flex-direction:column;gap:6px;">'
+            '<div style="font-size:13px;font-weight:600;color:var(--foreground);">%s</div>'
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;">%s</div>'
+            '<input class="note" placeholder="补充说明（可选）" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--foreground);font-size:13px;">'
+            '</div>' % (major, FACET_LABEL.get(major, major), tags))
+    return (
+        '<div style="display:flex;flex-direction:column;gap:14px;">'
+        '<div style="color:var(--muted-foreground);font-size:13px;">自我介绍 · 点选适用的标签（可多选），大类下可填补充说明 · 提交生成事实</div>'
+        '%s'
+        '<button id="sub" style="cursor:pointer;padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--foreground);font-size:13px;margin-top:4px;">submit</button>'
+        '</div>'
+        '<script>'
+        '(function(){'
+        'document.querySelectorAll(".tag").forEach(function(t){'
+        't.onclick=function(){var on=t.classList.toggle("on");'
+        't.style.background=on?"var(--accent)":"transparent";'
+        't.style.color=on?"#fff":"var(--foreground)";'
+        't.style.borderColor=on?"var(--accent)":"var(--border)";};});'
+        'document.getElementById("sub").onclick=function(){'
+        'var data=[];'
+        'document.querySelectorAll(".sec").forEach(function(sec){'
+        'var subs=[].slice.call(sec.querySelectorAll(".tag.on")).map(function(t){return t.getAttribute("data-v");});'
+        'var note=sec.querySelector(".note").value.trim();'
+        'if(subs.length||note)data.push({facet:sec.getAttribute("data-facet"),subs:subs,note:note});});'
+        'window.hermes.send("PMINIT "+JSON.stringify(data));};'
+        '})();'
+        '</script>'
+    ) % "\n".join(secs)
+
+
+def cmd_init(args):
+    ensure_dirs()
+    p = os.path.join(REVIEWS_DIR, "init.html")
+    write_text(p, _gen_init_widget())
+    print("init widget ->", p)
+
+
 def cmd_review(args):
     ensure_dirs()
     date = args.date or today()
@@ -791,6 +844,7 @@ def main():
     p.add_argument("reply")
     p.add_argument("--date")
 
+    sub.add_parser("init")
     sub.add_parser("export")
     sub.add_parser("rebuild")
 
@@ -810,7 +864,7 @@ def main():
 
     args = ap.parse_args()
     {"import": cmd_import, "add-facts": cmd_add_facts, "review": cmd_review,
-     "apply": cmd_apply, "export": cmd_export, "rebuild": cmd_rebuild,
+     "apply": cmd_apply, "init": cmd_init, "export": cmd_export, "rebuild": cmd_rebuild,
      "recall": cmd_recall, "config": cmd_config, "sync": cmd_sync}[args.cmd](args)
 
 

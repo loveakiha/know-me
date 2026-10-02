@@ -388,20 +388,35 @@ def _gen_widget(date, assigns, facts, tk_multi):
             cf = fact_by_id.get(cid)
             if cf:
                 conflict_html += '<div style="color:#ef4444;font-size:12px;">⚠ conflicts with confirmed: %s</div>' % _esc(cf.get("statement", ""))
-        cards.append(
-            '<div class="item" data-rid="%s" style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;">'
-            '<div style="color:var(--foreground);font-size:14px;line-height:1.5;">%s</div>'
-            '%s'
-            '<div style="display:flex;gap:14px;align-items:center;">'
-            '<button class="dec" data-v="对" title="true" style="cursor:pointer;border:none;background:transparent;color:#22c55e;font-size:16px;padding:0;">✓</button>'
-            '<button class="dec" data-v="不确定" title="not sure" style="cursor:pointer;border:none;background:transparent;color:#ef4444;font-size:16px;padding:0;">❓</button>'
-            '</div>'
-            '<div style="display:flex;gap:6px;align-items:center;">'
-            '<input class="fix" placeholder="clarify…" style="flex:1;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--foreground);font-size:13px;">'
-            '</div></div>' % (rid, _esc(f.get("statement")), conflict_html))
+        if conflict_html:
+            card = (
+                '<div class="item" data-rid="%s" style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;">'
+                '<div style="color:var(--foreground);font-size:14px;line-height:1.5;">%s</div>'
+                '%s'
+                '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">'
+                '<button class="opt" data-v="A" style="cursor:pointer;padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--foreground);font-size:12px;">A 旧的才对</button>'
+                '<button class="opt" data-v="B" style="cursor:pointer;padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--foreground);font-size:12px;">B 新的才对</button>'
+                '<button class="opt" data-v="C" style="cursor:pointer;padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--foreground);font-size:12px;">C 都对</button>'
+                '<button class="opt" data-v="D" style="cursor:pointer;padding:3px 9px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--foreground);font-size:12px;">D 其他</button>'
+                '</div>'
+                '<div style="display:flex;gap:6px;align-items:center;">'
+                '<input class="fix" placeholder="if D, explain…" style="flex:1;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--foreground);font-size:13px;">'
+                '</div></div>' % (rid, _esc(f.get("statement")), conflict_html))
+        else:
+            card = (
+                '<div class="item" data-rid="%s" style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;">'
+                '<div style="color:var(--foreground);font-size:14px;line-height:1.5;">%s</div>'
+                '<div style="display:flex;gap:14px;align-items:center;">'
+                '<button class="dec" data-v="对" title="true" style="cursor:pointer;border:none;background:transparent;color:#22c55e;font-size:16px;padding:0;">✓</button>'
+                '<button class="dec" data-v="不确定" title="not sure" style="cursor:pointer;border:none;background:transparent;color:#ef4444;font-size:16px;padding:0;">❓</button>'
+                '</div>'
+                '<div style="display:flex;gap:6px;align-items:center;">'
+                '<input class="fix" placeholder="clarify…" style="flex:1;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--foreground);font-size:13px;">'
+                '</div></div>' % (rid, _esc(f.get("statement"))))
+        cards.append(card)
     return (
         '<div style="display:flex;flex-direction:column;gap:10px;">'
-        '<div style="color:var(--muted-foreground);font-size:13px;">review · %d pending · ✓=true · ❓=not sure (explain in box) · then submit</div>'
+        '<div style="color:var(--muted-foreground);font-size:13px;">review · %d pending · ✓=true · ❓=not sure · conflict=A/B/C/D · then submit</div>'
         '%s'
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">'
         '<button id="allyes" style="cursor:pointer;padding:7px 14px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--foreground);font-size:13px;">✓ all</button>'
@@ -413,21 +428,25 @@ def _gen_widget(date, assigns, facts, tk_multi):
         'var state={};'
         'function set(b,on){b.style.opacity=on?"1":"0.4";b.style.fontWeight=on?"700":"400";}'
         'function refresh(){var n=0;items.forEach(function(it){var r=it.getAttribute("data-rid");var v=state[r];'
-        'it.querySelectorAll(".dec").forEach(function(b){set(b,b.getAttribute("data-v")===v);});if(v)n++;});'
+        'it.querySelectorAll(".dec,.opt").forEach(function(b){set(b,b.getAttribute("data-v")===v);});if(v)n++;});'
         'var sa=document.getElementById("submitall");sa.textContent="submit ("+n+")";'
         'sa.style.color=n?"var(--accent)":"var(--muted-foreground)";}'
         'items.forEach(function(it){var r=it.getAttribute("data-rid");'
-        'it.querySelectorAll(".dec").forEach(function(b){b.onclick=function(){var v=b.getAttribute("data-v");'
+        'it.querySelectorAll(".dec,.opt").forEach(function(b){b.onclick=function(){var v=b.getAttribute("data-v");'
         'state[r]=(state[r]===v)?undefined:v;refresh();};});'
-        'it.querySelector(".fix").addEventListener("focus",function(){state[r]="不确定";refresh();});'
+        'it.querySelector(".fix").addEventListener("focus",function(){'
+        'state[r]=it.querySelector(".opt")?"D":"不确定";refresh();});'
         '});'
         'document.getElementById("allyes").onclick=function(){'
-        'var ls=items.map(function(it){return it.getAttribute("data-rid")+" 对";});'
+        'var ls=items.filter(function(it){return !it.querySelector(".opt");})'
+        '.map(function(it){return it.getAttribute("data-rid")+" 对";});'
         'if(ls.length)window.hermes.send(ls.join("\\n"));};'
         'document.getElementById("submitall").onclick=function(){'
         'var ls=[];items.forEach(function(it){var r=it.getAttribute("data-rid");var v=state[r];'
         'if(v==="对")ls.push(r+" 对");'
         'else if(v==="不确定"){var t=it.querySelector(".fix").value.trim();ls.push(r+" 不确定"+(t?":"+t:""));}'
+        'else if(v==="A"||v==="B"||v==="C")ls.push(r+" "+v);'
+        'else if(v==="D"){var t=it.querySelector(".fix").value.trim();ls.push(r+" D"+(t?":"+t:""));}'
         '});'
         'if(ls.length)window.hermes.send(ls.join("\\n"));};'
         'refresh();'
@@ -560,6 +579,18 @@ def _parse_reply(text, rid2fact):
         if not rid:
             continue
         rest = line[m.end():].strip().lstrip("——-:：,、，.").strip()
+        mo = re.match(r"^([ABCD])\s*[:：]?\s*(.*)$", rest, re.I)
+        if mo:
+            o = mo.group(1).upper()
+            if o == "A":
+                decisions[rid] = ("reject", "维持已确认事实")
+            elif o == "B":
+                decisions[rid] = ("confirm", "采用新说法，旧事实待复核")
+            elif o == "C":
+                decisions[rid] = ("confirm", "两者都成立（补充）")
+            else:
+                decisions[rid] = ("skip", mo.group(2) or None)
+            continue
         if re.search(r"改\s*[为:：成]?", rest):
             m2 = re.search(r"改\s*[为:：成]?\s*[：:]\s*(.*)", rest) or re.search(r"改\s*[为:：成]?\s+(.*)", rest)
             decisions[rid] = ("modify", (m2.group(1).strip() if m2 else rest))

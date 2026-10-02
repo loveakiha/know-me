@@ -6,7 +6,7 @@ author: know-me contributors
 license: MIT
 metadata:
   hermes:
-    tags: [memory, personal-memory, know-me, cross-agent]
+    tags: [memory, know-me, cross-agent]
 ---
 
 # know me — cross-agent personal memory

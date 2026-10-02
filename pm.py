@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-pm — personal-memory v0 CLI
+pm — know-me v0 CLI
 
 单文件、零依赖（仅 stdlib）。个人记忆系统的确定性引擎：
   Observation(证据, 只追加) -> Candidate Fact(候选, 规则算置信) -> Human Review -> Confirmed Fact -> user_model.md
@@ -643,7 +643,7 @@ def cmd_sync(args):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="personal-memory v0")
+    ap = argparse.ArgumentParser(description="know-me v0")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("import", help="导入对话 -> observation")

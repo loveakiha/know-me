@@ -48,6 +48,22 @@ CATEGORIES = ["current_activity", "project", "interest", "tool_environment",
 CAT_LABEL = {"current_activity": "当前活动", "project": "项目", "interest": "兴趣",
              "tool_environment": "工具/技术环境", "preference": "偏好", "goal": "目标",
              "habit": "习惯", "constraint": "客观约束", "context": "背景"}
+# 标签体系（大类 -> 小类）：参考 GUMO 用户模型本体 + 大五人格 OCEAN + Tulving 情节/语义记忆划分
+TAXONOMY = {
+    "identity": ["name", "work", "family_role", "demographics"],
+    "traits": ["personality", "communication", "decision", "values"],
+    "skills": ["technical", "domain", "tools"],
+    "interests": ["tech", "gaming", "space", "parenting", "other"],
+    "activities": ["active", "closed", "planned"],
+    "environment": ["hardware", "software", "network"],
+    "relationships": ["family", "friends", "colleagues"],
+    "goals": ["near_term", "long_term"],
+}
+FACET_LABEL = {"identity": "身份", "traits": "特质/偏好", "skills": "能力/特长", "interests": "兴趣/爱好",
+               "activities": "活动/项目", "environment": "环境/设备", "relationships": "关系", "goals": "目标"}
+OLD_TO_FACET = {"current_activity": "activities", "project": "activities", "interest": "interests",
+                "tool_environment": "environment", "preference": "traits", "goal": "goals",
+                "habit": "traits", "constraint": "traits", "context": "traits"}
 RANK = {"asserted": 3, "observed": 2, "inferred": 1}
 
 
@@ -232,6 +248,7 @@ def _new_fact(inc, fid, now):
         "updated_at": now,
         "decided_at": None,
         "user_note": None,
+        "facets": inc.get("facets") or [],
     }
     f["confidence"] = compute_conf(f)
     return f
@@ -591,13 +608,18 @@ def cmd_export(args):
     conf = [f for f in facts if f.get("status") == "confirmed"]
     L = ["# 用户世界模型（导出视图）", "",
          "> 由 `facts.jsonl` 自动生成，可随时删除重建。唯一事实来源是 facts + reviews，请勿手改本文件。", ""]
+    def _major(f):
+        for fc in (f.get("facets") or []):
+            if "." in fc:
+                return fc.split(".", 1)[0]
+        return OLD_TO_FACET.get(f.get("category", ""), "traits")
     by = {}
     for f in conf:
-        by.setdefault(f.get("category", "context"), []).append(f)
-    for cat in CATEGORIES:
+        by.setdefault(_major(f), []).append(f)
+    for cat in TAXONOMY:
         if cat not in by:
             continue
-        L.append("## %s" % CAT_LABEL.get(cat, cat))
+        L.append("## %s" % FACET_LABEL.get(cat, cat))
         for f in by[cat]:
             src = ", ".join(f.get("source_agents", []) or [])
             L.append("- %s  `[%s]` (来源:%s, 置信%s/5)" % (
@@ -619,7 +641,7 @@ def cmd_rebuild(args):
     conn.execute("create table facts(id text primary key, topic_key text, category text, "
                  "predicate text, object text, statement text, evidence_type text, "
                  "confidence int, status text, first_observed_at text, last_observed_at text, "
-                 "obs_dates text, evidence_count int, source_agents text)")
+                 "obs_dates text, evidence_count int, source_agents text, facets text)")
     no, nf = 0, 0
     for root, _dirs, files in os.walk(OBS_DIR):
         for fn in files:
@@ -631,12 +653,13 @@ def cmd_rebuild(args):
                               o.get("conv_ref"), o.get("summary"), json.dumps(o.get("topics", []), ensure_ascii=False)))
                 no += 1
     for f in read_jsonl(FACTS_PATH):
-        conn.execute("insert or replace into facts values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        conn.execute("insert or replace into facts values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                      (f.get("id"), f.get("topic_key"), f.get("category"), f.get("predicate"),
                       f.get("object"), f.get("statement"), f.get("evidence_type"),
                       f.get("confidence"), f.get("status"), f.get("first_observed_at"),
                       f.get("last_observed_at"), json.dumps(f.get("obs_dates", []), ensure_ascii=False),
-                      f.get("evidence_count"), json.dumps(f.get("source_agents", []), ensure_ascii=False)))
+                      f.get("evidence_count"), json.dumps(f.get("source_agents", []), ensure_ascii=False),
+                      json.dumps(f.get("facets", []), ensure_ascii=False)))
         nf += 1
     conn.commit()
     conn.close()
@@ -648,11 +671,17 @@ def cmd_recall(args):
         cmd_rebuild(None)
     conn = sqlite3.connect(CACHE_DB)
     q = args.query
-    rows = conn.execute(
-        "select id,statement,category,confidence,status,topic_key from facts "
-        "where statement like ? or object like ? or topic_key like ? "
-        "order by (case status when 'confirmed' then 0 when 'candidate' then 1 else 2 end), confidence desc limit 20",
-        ("%" + q + "%", "%" + q + "%", "%" + q + "%")).fetchall()
+    if getattr(args, "facet", None):
+        rows = conn.execute(
+            "select id,statement,facets,confidence,status,topic_key from facts "
+            "where facets like ? order by confidence desc limit 50",
+            ("%" + args.facet + "%",)).fetchall()
+    else:
+        rows = conn.execute(
+            "select id,statement,facets,confidence,status,topic_key from facts "
+            "where statement like ? or object like ? or topic_key like ? "
+            "order by (case status when 'confirmed' then 0 when 'candidate' then 1 else 2 end), confidence desc limit 20",
+            ("%" + q + "%", "%" + q + "%", "%" + q + "%")).fetchall()
     conn.close()
     if not rows:
         print("无匹配")
@@ -703,6 +732,7 @@ def main():
 
     p = sub.add_parser("recall")
     p.add_argument("query")
+    p.add_argument("--facet", help="按标签过滤，如 interests.tech 或 activities")
 
     p = sub.add_parser("sync")
     p.add_argument("--message")

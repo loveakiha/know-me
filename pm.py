@@ -262,6 +262,20 @@ def _merge(existing, inc, now):
     existing["confidence"] = compute_conf(existing)
 
 
+def _find_conflicts(inc, index):
+    # 关联性匹配：同一实体(topic_key 或 object) 但谓词不同 + 已有 confirmed → 视为冲突
+    conf = []
+    for e in index.values():
+        if e.get("status") != "confirmed":
+            continue
+        same_tk = bool(e.get("topic_key")) and e.get("topic_key") == inc.get("topic_key")
+        same_obj = norm(e.get("object")) == norm(inc.get("object"))
+        diff_pred = norm(e.get("predicate")) != norm(inc.get("predicate"))
+        if (same_tk or same_obj) and diff_pred:
+            conf.append(e["id"])
+    return conf
+
+
 def cmd_add_facts(args):
     ensure_dirs()
     payload = json.load(open(args.file, encoding="utf-8"))
@@ -269,7 +283,7 @@ def cmd_add_facts(args):
     existing = read_jsonl(FACTS_PATH)
     index = {f["id"]: f for f in existing}
     now = utcnow_iso()
-    rep = {"created": 0, "merged": 0, "rejected_variant": 0}
+    rep = {"created": 0, "merged": 0, "rejected_variant": 0, "conflict": 0}
     for inc in incs:
         fid = fact_id(inc)
         if fid in index and index[fid]["status"] == "rejected":  # C4
@@ -282,14 +296,20 @@ def cmd_add_facts(args):
             index[newfid] = f
             rep["rejected_variant"] += 1
             continue
-        if fid in index:  # C3 累积
+        if fid in index:  # C3 累积（同一 identity = 重复，不新增、不重审）
             _merge(index[fid], inc, now)
             rep["merged"] += 1
         else:
-            index[fid] = _new_fact(inc, fid, now)
+            f = _new_fact(inc, fid, now)
+            # 自动关联匹配 + 手动标注（agent 对语义冲突如 photo-agent 可显式标 conflict_with）
+            conf = list(dict.fromkeys(_find_conflicts(inc, index) + (inc.get("conflict_with") or [])))
+            if conf:
+                f["conflict_with"] = conf
+                rep["conflict"] += 1
+            index[fid] = f
             rep["created"] += 1
     write_jsonl(FACTS_PATH, list(index.values()))
-    print("created=%d merged=%d rejected_variant=%d" % (rep["created"], rep["merged"], rep["rejected_variant"]))
+    print("created=%d merged=%d rejected_variant=%d conflict=%d" % (rep["created"], rep["merged"], rep["rejected_variant"], rep["conflict"]))
 
 
 # ---------- review ----------
@@ -325,18 +345,25 @@ def _sugg(f):
 
 
 def _gen_widget(date, assigns, facts, tk_multi):
+    fact_by_id = {f2["id"]: f2 for f2 in facts}
     cards = []
     for rid, f in assigns:
+        conflict_html = ""
+        for cid in (f.get("conflict_with") or []):
+            cf = fact_by_id.get(cid)
+            if cf:
+                conflict_html += '<div style="color:#ef4444;font-size:12px;">⚠ conflicts with confirmed: %s</div>' % _esc(cf.get("statement", ""))
         cards.append(
             '<div class="item" data-rid="%s" style="border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;">'
             '<div style="color:var(--foreground);font-size:14px;line-height:1.5;">%s</div>'
+            '%s'
             '<div style="display:flex;gap:14px;align-items:center;">'
             '<button class="dec" data-v="对" title="true" style="cursor:pointer;border:none;background:transparent;color:#22c55e;font-size:16px;padding:0;">✓</button>'
             '<button class="dec" data-v="不确定" title="not sure" style="cursor:pointer;border:none;background:transparent;color:#ef4444;font-size:16px;padding:0;">❓</button>'
             '</div>'
             '<div style="display:flex;gap:6px;align-items:center;">'
             '<input class="fix" placeholder="clarify…" style="flex:1;background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--foreground);font-size:13px;">'
-            '</div></div>' % (rid, _esc(f.get("statement"))))
+            '</div></div>' % (rid, _esc(f.get("statement")), conflict_html))
     return (
         '<div style="display:flex;flex-direction:column;gap:10px;">'
         '<div style="color:var(--muted-foreground);font-size:13px;">review · %d pending · ✓=true · ❓=not sure (explain in box) · then submit</div>'
@@ -425,18 +452,27 @@ def cmd_review(args):
     L = ["# 记忆确认 %s" % date, "", head, "",
          "这些是从你今天的对话里提炼的候选事实，你只需判断对/错/改（决策），不必补事实；若漏了重要的事，直接说一句，我再补提。",
          "[建议✅]=大概率成立，点头即可 · [建议❌]=大概率不对，先否 · [建议❓]=拿不准，你定。",
-         "逐行回复，每行一条判断（⚡=同主题多条，可能冲突，请并排看）：", "",
+         "逐行回复，每行一条判断（⚡=同主题多条 · ⚠️冲突=与已确认事实矛盾，重点看）：", "",
          "```", "R001 对", "R002 错,理由", "R003 改:新描述", "```", ""]
+    fact_by_id = {f2["id"]: f2 for f2 in facts}
     for rid, f in assigns:
         st = f.get("statement") or ""
         ev0 = (f.get("evidence") or [None])[0] or ""
         flag = " ⚡同主题" if tk_multi.get(f.get("topic_key", ""), 0) >= 2 else ""
+        conflict = f.get("conflict_with") or []
+        if conflict:
+            flag += " ⚠️冲突"
         L.append("- [ ] **%s** [建议%s] — %s%s" % (rid, _sugg(f), st, flag))
         L.append("  `%s` · %s · %s · 置信%s/5 · %s" % (
             f["id"], f.get("topic_key", ""), f.get("category", ""),
             f.get("confidence", ""), f.get("evidence_type", "")))
         if ev0:
             L.append("  · 证据：%s" % ev0[:80])
+        if conflict:
+            for cid in conflict:
+                cf = fact_by_id.get(cid)
+                if cf:
+                    L.append("  ⚠️ 与已确认事实冲突：`%s` [confirmed] %s" % (cid, cf.get("statement", "")))
         if tk_multi.get(f.get("topic_key", ""), 0) >= 2:
             for sib in facts:
                 if sib["id"] != f["id"] and sib.get("topic_key", "") == f.get("topic_key", ""):

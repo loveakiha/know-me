@@ -1,0 +1,4 @@
+# 私有数据绝不进 public 仓库（软件开源、数据私有）
+data/
+__pycache__/
+*.pyc

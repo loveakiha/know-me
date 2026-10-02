@@ -39,14 +39,23 @@ python pm.py export                              # -> data/user_model.md
 ## Daily
 `import hermes` (today only) → extract → add-facts → review (incremental) → deliver widget → apply → export → sync.
 
+## Init (self-introduction)
+`pm init` → generates `data/reviews/init.html` (8 facets × clickable sub-tags, multi-select + a note field per facet). Deliver with `::preview`. User taps tags + notes → `hermes.send("PMINIT <json>")`. Agent parses the json into asserted facts (`source_agent=self`), `add-facts` → `review` → user confirms.
+
+## Config (granularity + session summary)
+`pm config get` / `pm config set <key> <value>`.
+- `granularity`: `exhaustive` (default, extract everything) | `concise` (≤5 key facts/day, merge same-facet).
+- `session_summary`: `False` (default) | `True` — at conversation end (topic shift detected by session-topic-guard, or problem solved), agent summarizes that session into candidates and offers judgment; then add-facts → review → apply.
+
 ## Harvest from web AIs (ChatGPT / DeepSeek)
 They have no local write access — ask them to LIST their memory with `prompts/list_memory.md`, paste the output into facts.json, `pm add-facts` (source_agent=chatgpt/deepseek). Push back `user_model.md` by pasting. **Harvest BEFORE pushback** or they echo back what you fed.
 
 **Match before adding** (web-AI memory is stale and can conflict with confirmed facts — never let it silently override): duplicates → skip; same entity but contradictory predicate → set `conflict_with` (the agent does semantic matching, e.g. "开发 photo-agent" conflicts with "已关停 photo-agent"; `add-facts` also auto-flags same topic_key/object + different predicate); new → normal candidate. Conflicting facts surface in review with a ⚠️冲突 badge for focused confirmation.
 
 ## Review semantics
-- ✓ = confirm (saved as fact on submit). ❓ = not sure → user explains in the text box → agent analyzes the text: "不记得了"→delete/reject; "没关心X，只是朋友问"→reject + extract new fact; "应该是Y"→改; ambiguous→dialogue.
-- Select-then-submit (never immediate write — a misclick would corrupt the store). Minimal cards, symbol-only English chrome.
+- Plain entries: ✓ = confirm · ❓ = not sure → user explains in text box → agent analyzes ("不记得了"→reject; "没关心X只是朋友问"→reject+new fact; "应该是Y"→改; ambiguous→dialogue).
+- **Conflict entries (conflict_with non-empty) use A/B/C/D option buttons, not ✓/❓** — a conflict is a decision, not a judgment: A=keep confirmed (reject new) · B=new is right (adopt; old fact待复核) · C=both (new as supplement/history) · D=other (explain, agent analyzes).
+- Select-then-submit (never immediate write). Minimal cards, symbol-only English chrome.
 
 ## Pitfalls
 - `data/` stays private (gitignored). Only code/docs are public.

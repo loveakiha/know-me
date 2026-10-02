@@ -41,6 +41,7 @@ FACTS_PATH = os.path.join(DATA, "facts", "facts.jsonl")
 REVIEWS_DIR = os.path.join(DATA, "reviews")
 CACHE_DB = os.path.join(DATA, "cache.db")
 USER_MODEL = os.path.join(DATA, "user_model.md")
+CONFIG_PATH = os.path.join(DATA, "config.json")
 
 TZ = datetime.timezone(datetime.timedelta(hours=8))
 CATEGORIES = ["current_activity", "project", "interest", "tool_environment",
@@ -111,6 +112,23 @@ def append_jsonl(p, item):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "a", encoding="utf-8") as f:
         f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+
+DEFAULT_CONFIG = {"granularity": "exhaustive"}  # exhaustive=事无巨细 / concise=关键重要(≤5条/天, 大类合并)
+
+
+def load_config():
+    if os.path.exists(CONFIG_PATH):
+        try:
+            return {**DEFAULT_CONFIG, **json.load(open(CONFIG_PATH, encoding="utf-8"))}
+        except Exception:
+            pass
+    return dict(DEFAULT_CONFIG)
+
+
+def save_config(cfg):
+    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+    json.dump(cfg, open(CONFIG_PATH, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 
 
 def write_text(p, s):
@@ -690,6 +708,21 @@ def cmd_recall(args):
         print("[%s] %s  (%s · 置信%s · %s)" % (r[4], r[1], r[2], r[3], r[5]))
 
 
+# ---------- config ----------
+def cmd_config(args):
+    cfg = load_config()
+    if args.action == "get":
+        for k, v in cfg.items():
+            print("%s = %s" % (k, v))
+    elif args.action == "set":
+        if args.key == "granularity" and args.value not in ("exhaustive", "concise"):
+            print("granularity 只支持 exhaustive(事无巨细) / concise(关键重要≤5条/天)")
+            return
+        cfg[args.key] = args.value
+        save_config(cfg)
+        print("%s = %s" % (args.key, cfg[args.key]))
+
+
 # ---------- sync ----------
 def cmd_sync(args):
     if not os.path.isdir(os.path.join(ROOT, ".git")):
@@ -734,13 +767,20 @@ def main():
     p.add_argument("query")
     p.add_argument("--facet", help="按标签过滤，如 interests.tech 或 activities")
 
+    p = sub.add_parser("config")
+    csp = p.add_subparsers(dest="action", required=True)
+    csp.add_parser("get")
+    cset = csp.add_parser("set")
+    cset.add_argument("key")
+    cset.add_argument("value")
+
     p = sub.add_parser("sync")
     p.add_argument("--message")
 
     args = ap.parse_args()
     {"import": cmd_import, "add-facts": cmd_add_facts, "review": cmd_review,
      "apply": cmd_apply, "export": cmd_export, "rebuild": cmd_rebuild,
-     "recall": cmd_recall, "sync": cmd_sync}[args.cmd](args)
+     "recall": cmd_recall, "config": cmd_config, "sync": cmd_sync}[args.cmd](args)
 
 
 if __name__ == "__main__":

@@ -46,6 +46,11 @@ python "$SK/pm.py" --help        # verify: zero deps, no pip install
 
 ~50 KB, <2s. Mirror order matters: `raw.githubusercontent.com` is throttled/blocked on some networks (esp. CN); jsDelivr (`cdn.jsdelivr.net/gh/<user>/<repo>@main/<path>`) is the fallback. **Never bootstrap with `git clone`** — it inherits whatever broken global proxy config the machine has (measured on this host: clone dies on a dead socks5 while plain curl succeeds). After this, `pm.py` runs in place; to give it to another *profile*, copy `$SK` to `profiles/<name>/skills/know-me/`.
 
+**Dependencies: none.** `pm.py` imports only the stdlib (`argparse hashlib json os re sqlite3 subprocess datetime`) — no `pip install`, nothing to compile. Verified end-to-end (`init` + `export` + `install.py`) on CPython **3.8 / 3.9 / 3.13 / 3.14**; the only optional external program is `git`, used solely by `pm.py sync`.
+
+**Content freshness:** right after a push, `raw.githubusercontent.com` can still serve the previous bytes for a few minutes and jsDelivr `@main` for up to 12h. To confirm a push landed, use `git ls-remote origin` or the codeload tarball — not a CDN fetch.
+
+
 Fastest path for a new profile — this skill is NOT a bundled skill, so `hermes profile create <name>` alone seeds **bundled skills only** and will not have it:
 ```bash
 hermes profile create <name> --clone      # 把当前 profile 的 skills 一起带过去（含 scripts/engine/，已验证）
